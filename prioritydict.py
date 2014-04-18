@@ -11,6 +11,8 @@ from collections import ItemsView as AbstractItemsView
 
 from itertools import chain, repeat
 
+_NotGiven = object()
+
 class _IlocWrapper:
     def __init__(self, _dict):
         self._dict = _dict
@@ -42,13 +44,17 @@ class _IlocWrapper:
             del self._dict._dict[key]
 
 class PriorityDict(MutableMapping):
-    def __init__(self, values=None):
-        self._dict = dict()
+    """
+    Implements three types:
+    * dictionary which orders elements by value
+    * collections.Counter
+    * set-like operations for bag type
+    """
+    def __init__(self, *args, **kwargs):
+        self._dict = Counter()
         self._list = SortedList()
         self.iloc = _IlocWrapper(self)
-
-        if values is not None:
-            self.update(values)
+        self.update(*args, **kwargs)
 
     def clear(self):
         """Remove all elements from the dictionary."""
@@ -70,15 +76,10 @@ class PriorityDict(MutableMapping):
 
     def __getitem__(self, key):
         """
-        Return the priority in *d* of *key*.  Raises a KeyError if *key* is not
+        Return the priority of *key* in *d*.  Raises a KeyError if *key* is not
         in the dictionary.
         """
         return self._dict[key]
-
-    def __eq__(self, that):
-        raise NotImplementedError
-    def __ne__(self, that):
-        raise NotImplementedError
 
     def __iter__(self):
         """
@@ -134,8 +135,47 @@ class PriorityDict(MutableMapping):
         return key in self._dict
 
     def items(self):
-        # TODO: Pickup at line 179 in sorteddict.py
         raise NotImplementedError
+    def iteritems(self):
+        raise NotImplementedError
+    def viewitems(self):
+        raise NotImplementedError
+    def keys(self):
+        raise NotImplementedError
+    def iterkeys(self):
+        raise NotImplementedError
+    def viewkeys(self):
+        raise NotImplementedError
+    def values(self):
+        raise NotImplementedError
+    def itervalues(self):
+        raise NotImplementedError
+    def viewvalues(self):
+        raise NotImplementedError
+    
+    def pop(self, key, default=_NotGiven):
+        if key in self._dict:
+            value = self._dict[key]
+            self._list.remove((value, key))
+            return self._dict.pop(key)
+        else:
+            if default == _NotGiven:
+                raise KeyError
+            else:
+                return default
+
+    def setdefault(self, key, default=0):
+        """
+        If *key* is in the dictionary, return its value.  If not, insert *key*
+        with a value of *default* and return *default*.  *default* defaults to
+        ``0``.
+        """
+        if key in self._dict:
+            return self._dict[key]
+        else:
+            self._dict[key] = default
+            self._list.add((default, key))
+            return default
 
     @classmethod
     def fromcounter(cls, counter):
@@ -171,19 +211,148 @@ class PriorityDict(MutableMapping):
         counter). Like dict.update() but subtracts counts instead of replacing
         them. Both inputs and outputs may be zero or negative.
         """
-        raise NotImplementedError
+        counter = Counter(elements)
 
-    def update(self, iterable):
+        for key in counter:
+            if key in self._dict:
+                self._list.remove((self._dict[key], key))
+
+        self._dict.subtract(counter)
+
+        for key in counter:
+            self._list.add((self._dict[key], key))
+
+    def update(self, *args, **kwargs):
         """
         Elements are counted from an iterable or added-in from another mapping
         (or counter). Like dict.update() but adds counts instead of replacing
         them. Also, the iterable is expected to be a sequence of elements, not a
         sequence of (key, value) pairs.
         """
+        counter = Counter(*args, **kwargs)
+
+        for key in counter:
+            if key in self._dict:
+                self._list.remove((self._dict[key], key))
+
+        self._dict.update(counter)
+
+        for key in counter:
+            self._list.add((self._dict[key], key))
+
+    def popitem(self, index=-1):
+        """
+        Remove and return item at *index* (default: -1). Raises IndexError if
+        dict is empty or index is out of range. Negative indices are supported
+        as for slice indices.
+        """
+        value, key = self._list[index]
+        del self._list[index]
+        del self._dict[key]
+        return key, value
+
+    def index(self, key):
+        if key in self._dict:
+            value = self._dict[key]
+            return self._list.bisect((value, key))
+        else:
+            return -1
+
+    def bisect_left(self, priority):
+        return self._list.bisect_left((priority,))
+    def bisect(self, priority):
+        return self._list.bisect((priority,))
+    def bisect_right(self, priority):
+        return self._list.bisect_right((priority,))
+
+    def isdisjoint(self, that):
+        raise NotImplementedError
+    def issubset(self, that):
+        raise NotImplementedError
+    def issuperset(self, that):
         raise NotImplementedError
 
-    def pop(self):
+    def difference(self, *iterables):
+        raise NotImplementedError
+    def difference_update(self, *iterables):
+        raise NotImplementedError
+    def intersection(self, *iterables):
+        raise NotImplementedError
+    def intersection_update(self, *iterables):
+        raise NotImplementedError
+    def symmetric_difference(self, that):
+        raise NotImplementedError
+    def symmetric_difference_update(self, that):
+        raise NotImplementedError
+    def union(self, *iterables):
         raise NotImplementedError
 
-    def popleft(self):
+    def __add__(self, that):
+        raise NotImplementedError
+    def __iadd__(self, that):
+        raise NotImplementedError
+
+    def __sub__(self, that):
+        raise NotImplementedError
+    def __isub__(self, that):
+        raise NotImplementedError
+
+    def __and__(self, that):
+        raise NotImplementedError
+    def __or__(self, that):
+        raise NotImplementedError
+    def __xor__(self, that):
+        raise NotImplementedError
+
+    def __mul__(self, that):
+        raise NotImplementedError
+
+    def __imul__(self, that):
+        raise NotImplementedError
+
+    def __eq__(self, that):
+        """Compare two mappings for equality."""
+        return self._dict == that
+
+    def __ne__(self, that):
+        """Compare two mappings for inequality."""
+        return self._dict != that
+
+    def __lt__(self, that):
+        """Compare two mappings for less than."""
+        _dict = self._dict
+        try:
+            return all(_dict[key] < that[key] for key in that)
+        except KeyError:
+            return False
+
+    def __le__(self, that):
+        """Compare two mappings for less than equal."""
+        _dict = self._dict
+        try:
+            return (_dict == that or all(_dict[key] < that[key] for key in that))
+        except KeyError:
+            return False
+
+    def __gt__(self, that):
+        """Compare two mappings for greater than."""
+        _dict = self._dict
+        try:
+            return all(_dict[key] > that[key] for key in that)
+        except KeyError:
+            return False
+
+    def __ge__(self, that):
+        """Compare two mappings for greater than equal."""
+        _dict = self._dict
+        try:
+            return (_dict == that or all(_dict[key] > that[key] for key in that))
+        except KeyError:
+            return False
+
+    def __repr__(self):
+        """Return string representation of PriorityDict."""
+        raise NotImplementedError
+
+    def _check(self):
         raise NotImplementedError
