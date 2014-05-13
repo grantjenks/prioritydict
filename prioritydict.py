@@ -1,17 +1,54 @@
 # -*- coding: utf-8 -*-
-#
-# PriorityDict implementation.
+
+"""
+PriorityDict Implementation
+===========================
+
+PriorityDict is an Apache2 licensed implementation of a dictionary which
+maintains key-value pairs in value sort order.
+"""
 
 from sortedcontainers import SortedList
 
-from collections import MutableMapping
+from collections import Counter, MutableMapping, Set, Sequence
 from collections import KeysView as AbstractKeysView
 from collections import ValuesView as AbstractValuesView
 from collections import ItemsView as AbstractItemsView
 
+from functools import wraps
 from itertools import chain, repeat
+from sys import hexversion
 
 _NotGiven = object()
+
+class _Biggest:
+    """An object that is greater than all others."""
+    def __gt__(self, that):
+        return True
+    def __ge__(self, that):
+        return True
+    def __lt__(self, that):
+        return False
+    def __le__(self, that):
+        return False
+    def __eq__(self, that):
+        return False
+    def __ne__(self, that):
+        return True
+
+_Biggest = _Biggest()
+
+def not26(func):
+    """Function decorator for methods not implemented in Python 2.6."""
+
+    @wraps(func)
+    def errfunc(*args, **kwargs):
+        raise NotImplementedError
+
+    if hexversion < 0x02070000:
+        return errfunc
+    else:
+        return func
 
 class _IlocWrapper:
     def __init__(self, _dict):
@@ -26,7 +63,10 @@ class _IlocWrapper:
         negative indices and slice notation. Raises IndexError on invalid
         *index*.
         """
-        return self._dict._list[index]
+        if isinstance(index, slice):
+            return [tup[1] for tup in self._dict._list[index]]
+        else:
+            return self._dict._list[index][1]
 
     def __delitem__(self, index):
         """
@@ -34,17 +74,48 @@ class _IlocWrapper:
         indices and slice notation. Raises IndexError on invalid *index*.
         """
         if isinstance(index, slice):
-            keys = self._dict._list[index]
+            keys = [tup[1] for tup in self._dict._list[index]]
             del self._dict._list[index]
             for key in keys:
                 del self._dict._dict[key]
         else:
-            key = self._dict._list[index]
+            key = self._dict._list[index][1]
             del self._dict._list[index]
             del self._dict._dict[key]
 
 class PriorityDict(MutableMapping):
+    """
+    A PriorityDict provides the same methods as a dict. Additionally, a
+    PriorityDict efficiently maintains its keys in value sorted order.
+    Consequently, the keys method will return the keys in value sorted order,
+    the popitem method will remove the item with the highest value, etc.
+    """
     def __init__(self, *args, **kwargs):
+        """
+        A PriorityDict provides the same methods as a dict. Additionally, a
+        PriorityDict efficiently maintains its keys in value sorted order.
+        Consequently, the keys method will return the keys in value sorted
+        order, the popitem method will remove the item with the highest value,
+        etc.
+
+        An optional *iterable* provides an initial series of items to
+        populate the PriorityDict. Like collections.Counter, items are
+        counted from iterable.
+
+        If keyword arguments are given, the keywords themselves with their
+        associated values are added as items to the dictionary. If a key is
+        specified both in the positional argument and as a keyword argument,
+        the value associated with the keyword is retained in the dictionary.
+        For example, these all return a dictionary equal to ``{"one": 2,
+        "two": 3}``:
+
+        * ``PriorityDict(one=2, two=3)``
+        * ``PriorityDict({'one': 2, 'two': 3})``
+        * ``PriorityDict(['one', 'two', 'one', 'two', 'two')``
+
+        The first example only works for keys that are valid Python
+        identifiers; the others work with any valid keys.
+        """
         self._dict = Counter()
         self._list = SortedList()
         self.iloc = _IlocWrapper(self)
@@ -94,6 +165,7 @@ class PriorityDict(MutableMapping):
         return len(self._dict)
 
     def __setitem__(self, key, value):
+        """Set `d[key]` to *value*."""
         if key in self._dict:
             value = self._dict[key]
             self._list.remove((value, key))
@@ -129,23 +201,83 @@ class PriorityDict(MutableMapping):
         return key in self._dict
 
     def items(self):
-        raise NotImplementedError
+        """
+        In Python 2, returns a list of the dictionary's items (``(key, value)``
+        pairs).
+
+        In Python 3, returns a new ItemsView of the dictionary's items.  In
+        addition to the methods provided by the built-in `view` the ItemsView is
+        indexable (e.g., ``d.items()[5]``).
+        """
+        if hexversion < 0x03000000:
+            return list((key, value) for value, key in self._list)
+        else:
+            return ItemsView(self)
+
     def iteritems(self):
-        raise NotImplementedError
+        """Return an iterable over the items (``(key, value)`` pairs)."""
+        return iter((key, value) for value, key in self._list)
+
+    @not26
     def viewitems(self):
-        raise NotImplementedError
+        """
+        In Python 2.7 and later, return a new `ItemsView` of the dictionary's
+        items.
+
+        In Python 2.6, raise a NotImplementedError.
+        """
+        return ItemsView(self)
+
     def keys(self):
-        raise NotImplementedError
+        """
+        In Python 2, return a list of the dictionary's keys.
+
+        In Python 3, return a new KeysView of the dictionary's keys.  In
+        addition to the methods provided by the built-in `view` the KeysView is
+        indexable (e.g., ``d.keys()[5]``).
+        """
+        if hexversion < 0x03000000:
+            return list(key for value, key in self._list)
+        else:
+            return KeysView(self)
+
     def iterkeys(self):
-        raise NotImplementedError
+        """Return an iterable over the keys of the dictionary."""
+        return iter(key for value, key in self._list)
+
+    @not26
     def viewkeys(self):
-        raise NotImplementedError
+        """
+        In Python 2.7 and later, return a new `KeysView` of the dictionary's
+        keys.
+
+        In Python 2.6, raise a NotImplementedError.
+        """
+        return KeysView(self)
+
     def values(self):
-        raise NotImplementedError
+        """
+        In Python 2, return a list of the dictionary's values.
+
+        In Python 3, return a new :class:`ValuesView` of the dictionary's
+        values.  In addition to the methods provided by the built-in `view`
+        the ValuesView is indexable (e.g., ``d.values()[5]``).
+        """
+        return list(value for value, key in self._list)
+
     def itervalues(self):
-        raise NotImplementedError
+        """Return an iterable over the values of the dictionary."""
+        return iter(value for value, key in self._list)
+
+    @not26
     def viewvalues(self):
-        raise NotImplementedError
+        """
+        In Python 2.7 and later, return a new `ValuesView` of the dictionary's
+        values.
+
+        In Python 2.6, raise a NotImplementedError.
+        """
+        return ValuesView(self)
     
     def pop(self, key, default=_NotGiven):
         """
@@ -246,46 +378,184 @@ class PriorityDict(MutableMapping):
         else:
             return pos
 
-    def bisect_left(self, priority):
-        return self._list.bisect_left((priority,))
+    def bisect_left(self, value):
+        """
+        Similar to the ``bisect`` module in the standard library, this returns
+        an appropriate index to insert *value* in PriorityDict. If *value* is
+        already present in PriorityDict, the insertion point will be before (to
+        the left of) any existing entries.
+        """
+        return self._list.bisect_left((value,))
 
-    def bisect(self, priority):
-        return self._list.bisect((priority,))
+    def bisect(self, value):
+        """Same as bisect_left."""
+        return self._list.bisect((value,))
 
-    def bisect_right(self, priority):
-        return self._list.bisect_right((priority,))
+    def bisect_right(self, value):
+        """
+        Same as `bisect_left`, but if *value* is already present in
+        PriorityDict, the insertion point will be after (to the right
+        of) any existing entries.
+        """
+        # TODO: test with multiple equal values
+        return self._list.bisect_right((value, _Biggest))
 
     def __add__(self, that):
-        result = PriorityDict(self)
-        result += that
+        """Add values from two mappings."""
+        result = PriorityDict()
+        result._dict.update(self._dict)
+        result._dict += that
+        if hexversion < 0x03000000:
+            items = result._dict.iteritems()
+        else:
+            items = iter(result._dict.items())
+        result._list.update((value, key) for key, value in items)
         return result
 
     def __iadd__(self, that):
-        raise NotImplementedError
+        """Add values from `that` mapping."""
+        # TODO: Refactor to stub generic application of operator
+        if isinstance(that, PriorityDict):
+            that = that._dict
+
+        if len(that) * 3 > len(self._dict):
+            self._dict += that
+            self._list.clear()
+
+            if hexversion < 0x03000000:
+                items = self._dict.iteritems()
+            else:
+                items = iter(self._dict.items())
+
+            self._list.update((value, key) for key, value in items)
+        else:
+            for key in that:
+                if key in self._dict:
+                    value = self._dict[key]
+                    self._list.remove((value, key))
+
+            self._dict += that
+
+            for key in that:
+                value = self._dict[key]
+                self._list.add((value, key))
 
     def __sub__(self, that):
-        result = PriorityDict(self)
-        result -= that
+        """Subtract values from two mappings."""
+        result = PriorityDict()
+        result._dict.update(self._dict)
+        result._dict -= that
+        if hexversion < 0x03000000:
+            items = result._dict.iteritems()
+        else:
+            items = iter(result._dict.items())
+        result._list.update((value, key) for key, value in items)
         return result
 
     def __isub__(self, that):
-        raise NotImplementedError
+        """Subtract values from `that` mapping."""
+        if isinstance(that, PriorityDict):
+            that = that._dict
+
+        if len(that) * 3 > len(self._dict):
+            self._dict -= that
+            self._list.clear()
+
+            if hexversion < 0x03000000:
+                items = self._dict.iteritems()
+            else:
+                items = iter(self._dict.items())
+
+            self._list.update((value, key) for key, value in items)
+        else:
+            for key in that:
+                if key in self._dict:
+                    value = self._dict[key]
+                    self._list.remove((value, key))
+
+            self._dict -= that
+
+            for key in that:
+                value = self._dict[key]
+                self._list.add((value, key))
 
     def __and__(self, that):
-        result = PriorityDict(self)
-        result &= that
+        """And values from two mappings (min(v1, v2))."""
+        result = PriorityDict()
+        result._dict.update(self._dict)
+        result._dict &= that
+        if hexversion < 0x03000000:
+            items = result._dict.iteritems()
+        else:
+            items = iter(result._dict.items())
+        result._list.update((value, key) for key, value in items)
         return result
 
     def __iand__(self, that):
-        raise NotImplementedError
+        """And values from `that` mapping (min(v1, v2))."""
+        if isinstance(that, PriorityDict):
+            that = that._dict
+
+        if len(that) * 3 > len(self._dict):
+            self._dict &= that
+            self._list.clear()
+
+            if hexversion < 0x03000000:
+                items = self._dict.iteritems()
+            else:
+                items = iter(self._dict.items())
+
+            self._list.update((value, key) for key, value in items)
+        else:
+            for key in that:
+                if key in self._dict:
+                    value = self._dict[key]
+                    self._list.remove((value, key))
+
+            self._dict &= that
+
+            for key in that:
+                value = self._dict[key]
+                self._list.add((value, key))
 
     def __or__(self, that):
-        result = PriorityDict(self)
-        result |= that
+        """Or values from two mappings (max(v1, v2))."""
+        result = PriorityDict()
+        result._dict.update(self._dict)
+        result._dict |= that
+        if hexversion < 0x03000000:
+            items = result._dict.iteritems()
+        else:
+            items = iter(result._dict.items())
+        result._list.update((value, key) for key, value in items)
         return result
 
     def __ior__(self, that):
-        raise NotImplementedError
+        """Or values from `that` mapping (max(v1, v2))."""
+        if isinstance(that, PriorityDict):
+            that = that._dict
+
+        if len(that) * 3 > len(self._dict):
+            self._dict |= that
+            self._list.clear()
+
+            if hexversion < 0x03000000:
+                items = self._dict.iteritems()
+            else:
+                items = iter(self._dict.items())
+
+            self._list.update((value, key) for key, value in items)
+        else:
+            for key in that:
+                if key in self._dict:
+                    value = self._dict[key]
+                    self._list.remove((value, key))
+
+            self._dict |= that
+
+            for key in that:
+                value = self._dict[key]
+                self._list.add((value, key))
 
     def __eq__(self, that):
         """Compare two mappings for equality."""
@@ -332,3 +602,305 @@ class PriorityDict(MutableMapping):
         assert len(self._dict) == len(self._list)
         assert all(key in self._dict and self._dict[key] == value
                    for value, key in self._list)
+
+#TODO: views were copied from sorteddict.py
+
+class KeysView(AbstractKeysView, Set, Sequence):
+    """
+    A KeysView object is a dynamic view of the dictionary's keys, which
+    means that when the dictionary's keys change, the view reflects
+    those changes.
+
+    The KeysView class implements the Set and Sequence Abstract Base Classes.
+    """
+    def __init__(self, priority_dict):
+        """
+        Initialize a KeysView from a PriorityDict container as *priority_dict*.
+        """
+        self._list = priority_dict._list
+        if version_info[0] == 2:
+            self._view = priority_dict._dict.viewkeys()
+        else:
+            self._view = priority_dict._dict.keys()
+    def __len__(self):
+        """Return the number of entries in the dictionary."""
+        return len(self._view)
+    def __contains__(self, key):
+        """
+        Return True if and only if *key* is one of the underlying dictionary's
+        keys.
+        """
+        return key in self._view
+    def __iter__(self):
+        """
+        Return an iterable over the keys in the dictionary. Keys are iterated
+        over in their sorted order.
+
+        Iterating views while adding or deleting entries in the dictionary may
+        raise a RuntimeError or fail to iterate over all entries.
+        """
+        return iter(key for value, key in self._list)
+    def __getitem__(self, index):
+        """Return the key at position *index*."""
+        return self._list[index][1]
+    def __reversed__(self):
+        """
+        Return a reversed iterable over the keys in the dictionary. Keys are
+        iterated over in reverse value sort order.
+
+        Iterating views while adding or deleting entries in the dictionary may
+        raise a RuntimeError or fail to iterate over all entries.
+        """
+        return iter(key for value, key in reversed(self._list))
+    def index(self, value, start=None, stop=None):
+        """
+        Return the smallest *k* such that `keysview[k] == value` and `start <= k
+        < end`.  Raises `KeyError` if *value* is not present.  *stop* defaults
+        to the end of the set.  *start* defaults to the beginning.  Negative
+        indexes are supported, as for slice indices.
+        """
+        return self._list.index(value, start, stop)
+    def count(self, value):
+        """Return the number of occurrences of *value* in the set."""
+        return 1 if value in self._view else 0
+    def __eq__(self, that):
+        """Test set-like equality with *that*."""
+        return self._view == that
+    def __ne__(self, that):
+        """Test set-like inequality with *that*."""
+        return self._view != that
+    def __lt__(self, that):
+        """Test whether self is a proper subset of *that*."""
+        return self._view < that
+    def __gt__(self, that):
+        """Test whether self is a proper superset of *that*."""
+        return self._view > that
+    def __le__(self, that):
+        """Test whether self is contained within *that*."""
+        return self._view <= that
+    def __ge__(self, that):
+        """Test whether *that* is contained within self."""
+        return self._view >= that
+    def __and__(self, that):
+        """Return a SortedSet of the intersection of self and *that*."""
+        return SortedSet(self._view & that)
+    def __or__(self, that):
+        """Return a SortedSet of the union of self and *that*."""
+        return SortedSet(self._view | that)
+    def __sub__(self, that):
+        """Return a SortedSet of the difference of self and *that*."""
+        return SortedSet(self._view - that)
+    def __xor__(self, that):
+        """Return a SortedSet of the symmetric difference of self and *that*."""
+        return SortedSet(self._view ^ that)
+    def isdisjoint(self, that):
+        """Return True if and only if *that* is disjoint with self."""
+        if version_info[0] == 2:
+            return not any(key in self._list for key in that)
+        else:
+            return self._view.isdisjoint(that)
+    def __repr__(self):
+        return 'SortedDict_keys({0})'.format(repr(list(self)))
+
+class ValuesView(AbstractValuesView, Sequence):
+    """
+    A ValuesView object is a dynamic view of the dictionary's values, which
+    means that when the dictionary's values change, the view reflects those
+    changes.
+
+    The ValuesView class implements the Sequence Abstract Base Class.
+    """
+    def __init__(self, sorted_dict):
+        """
+        Initialize a ValuesView from a SortedDict container as *sorted_dict*.
+        """
+        self._dict = sorted_dict
+        self._list = sorted_dict._list
+        if version_info[0] == 2:
+            self._view = sorted_dict._dict.viewvalues()
+        else:
+            self._view = sorted_dict._dict.values()
+    def __len__(self):
+        """Return the number of entries in the dictionary."""
+        return len(self._dict)
+    def __contains__(self, value):
+        """
+        Return True if and only if *value* is on the underlying dictionary's
+        values.
+        """
+        return value in self._view
+    def __iter__(self):
+        """
+        Return an iterator over the values in the dictionary.  Values are
+        iterated over in sorted order of the keys.
+
+        Iterating views while adding or deleting entries in the dictionary may
+        raise a `RuntimeError` or fail to iterate over all entries.
+        """
+        return iter(self._dict[key] for key in self._list)
+    def __getitem__(self, index):
+        """
+        Efficiently return value at *index* in iteration.
+
+        Supports slice notation and negative indexes.
+        """
+        if isinstance(index, slice):
+            return [self._dict[key] for key in self._list[index]]
+        else:
+            return self._dict[self._list[index]]
+    def __reversed__(self):
+        """
+        Return a reverse iterator over the values in the dictionary.  Values are
+        iterated over in reverse sort order of the keys.
+
+        Iterating views while adding or deleting entries in the dictionary may
+        raise a `RuntimeError` or fail to iterate over all entries.
+        """
+        return iter(self._dict[key] for key in reversed(self._list))
+    def index(self, value):
+        """
+        Return index of *value* in self.
+
+        Raises ValueError if *value* is not found.
+        """
+        for idx, val in enumerate(self):
+            if value == val:
+                return idx
+        else:
+            raise ValueError
+    def count(self, value):
+        """Return the number of occurrences of *value* in self."""
+        if version_info[0] == 2:
+            return sum(1 for val in self._dict.itervalues() if val == value)
+        else:
+            return sum(1 for val in self._dict.values() if val == value)
+    def __lt__(self, that):
+        raise TypeError
+    def __gt__(self, that):
+        raise TypeError
+    def __le__(self, that):
+        raise TypeError
+    def __ge__(self, that):
+        raise TypeError
+    def __and__(self, that):
+        raise TypeError
+    def __or__(self, that):
+        raise TypeError
+    def __sub__(self, that):
+        raise TypeError
+    def __xor__(self, that):
+        raise TypeError
+    def __repr__(self):
+        return 'SortedDict_values({0})'.format(repr(list(self)))
+
+class ItemsView(AbstractItemsView, Set, Sequence):
+    """
+    An ItemsView object is a dynamic view of the dictionary's ``(key,
+    value)`` pairs, which means that when the dictionary changes, the
+    view reflects those changes.
+
+    The ItemsView class implements the Set and Sequence Abstract Base Classes.
+    However, the set-like operations (``&``, ``|``, ``-``, ``^``) will only
+    operate correctly if all of the dictionary's values are hashable.
+    """
+    def __init__(self, sorted_dict):
+        """
+        Initialize an ItemsView from a SortedDict container as *sorted_dict*.
+        """
+        self._dict = sorted_dict
+        self._list = sorted_dict._list
+        if version_info[0] == 2:
+            self._view = sorted_dict._dict.viewitems()
+        else:
+            self._view = sorted_dict._dict.items()
+    def __len__(self):
+        """Return the number of entries in the dictionary."""
+        return len(self._view)
+    def __contains__(self, key):
+        """
+        Return True if and only if *key* is one of the underlying dictionary's
+        items.
+        """
+        return key in self._view
+    def __iter__(self):
+        """
+        Return an iterable over the items in the dictionary. Items are iterated
+        over in their sorted order.
+
+        Iterating views while adding or deleting entries in the dictionary may
+        raise a RuntimeError or fail to iterate over all entries.
+        """
+        return iter((key, self._dict[key]) for key in self._list)
+    def __getitem__(self, index):
+        """Return the item as position *index*."""
+        if isinstance(index, slice):
+            return [(key, self._dict[key]) for key in self._list[index]]
+        else:
+            key = self._list[index]
+            return (key, self._dict[key])
+    def __reversed__(self):
+        """
+        Return a reversed iterable over the items in the dictionary. Items are
+        iterated over in their reverse sort order.
+
+        Iterating views while adding or deleting entries in the dictionary may
+        raise a RuntimeError or fail to iterate over all entries.
+        """
+        return iter((key, self._dict[key]) for key in reversed(self._list))
+    def index(self, key, start=None, stop=None):
+        """
+        Return the smallest *k* such that `itemssview[k] == key` and `start <= k
+        < end`.  Raises `KeyError` if *key* is not present.  *stop* defaults
+        to the end of the set.  *start* defaults to the beginning.  Negative
+        indexes are supported, as for slice indices.
+        """
+        pos = self._list.index(key[0], start, stop)
+        if key[1] == self._dict[key[0]]:
+            return pos
+        else:
+            raise ValueError
+    def count(self, item):
+        """Return the number of occurrences of *item* in the set."""
+        key, value = item
+        return 1 if key in self._dict and self._dict[key] == value else 0
+    def __eq__(self, that):
+        """Test set-like equality with *that*."""
+        return self._view == that
+    def __ne__(self, that):
+        """Test set-like inequality with *that*."""
+        return self._view != that
+    def __lt__(self, that):
+        """Test whether self is a proper subset of *that*."""
+        return self._view < that
+    def __gt__(self, that):
+        """Test whether self is a proper superset of *that*."""
+        return self._view > that
+    def __le__(self, that):
+        """Test whether self is contained within *that*."""
+        return self._view <= that
+    def __ge__(self, that):
+        """Test whether *that* is contained within self."""
+        return self._view >= that
+    def __and__(self, that):
+        """Return a SortedSet of the intersection of self and *that*."""
+        return SortedSet(self._view & that)
+    def __or__(self, that):
+        """Return a SortedSet of the union of self and *that*."""
+        return SortedSet(self._view | that)
+    def __sub__(self, that):
+        """Return a SortedSet of the difference of self and *that*."""
+        return SortedSet(self._view - that)
+    def __xor__(self, that):
+        """Return a SortedSet of the symmetric difference of self and *that*."""
+        return SortedSet(self._view ^ that)
+    def isdisjoint(self, that):
+        """Return True if and only if *that* is disjoint with self."""
+        if version_info[0] == 2:
+            for key, value in that:
+                if key in self._dict and self._dict[key] == value:
+                    return False
+            return True
+        else:
+            return self._view.isdisjoint(that)
+    def __repr__(self):
+        return 'SortedDict_items({0})'.format(repr(list(self)))
