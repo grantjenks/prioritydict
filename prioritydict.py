@@ -19,6 +19,8 @@ from functools import wraps
 from itertools import chain, repeat
 from sys import hexversion
 
+import operator as op
+
 _NotGiven = object()
 
 class _Biggest:
@@ -400,11 +402,10 @@ class PriorityDict(MutableMapping):
         # TODO: test with multiple equal values
         return self._list.bisect_right((value, _Biggest))
 
-    def __add__(self, that):
-        """Add values from two mappings."""
+    def _op(self, that, func):
         result = PriorityDict()
         result._dict.update(self._dict)
-        result._dict += that
+        func(result._dict, that)
         if hexversion < 0x03000000:
             items = result._dict.iteritems()
         else:
@@ -412,131 +413,28 @@ class PriorityDict(MutableMapping):
         result._list.update((value, key) for key, value in items)
         return result
 
-    def __iadd__(self, that):
-        """Add values from `that` mapping."""
-        # TODO: Refactor to stub generic application of operator
-        if isinstance(that, PriorityDict):
-            that = that._dict
-
-        if len(that) * 3 > len(self._dict):
-            self._dict += that
-            self._list.clear()
-
-            if hexversion < 0x03000000:
-                items = self._dict.iteritems()
-            else:
-                items = iter(self._dict.items())
-
-            self._list.update((value, key) for key, value in items)
-        else:
-            for key in that:
-                if key in self._dict:
-                    value = self._dict[key]
-                    self._list.remove((value, key))
-
-            self._dict += that
-
-            for key in that:
-                value = self._dict[key]
-                self._list.add((value, key))
+    def __add__(self, that):
+        """Add values from two mappings."""
+        return self._op(that, op.add)
 
     def __sub__(self, that):
         """Subtract values from two mappings."""
-        result = PriorityDict()
-        result._dict.update(self._dict)
-        result._dict -= that
-        if hexversion < 0x03000000:
-            items = result._dict.iteritems()
-        else:
-            items = iter(result._dict.items())
-        result._list.update((value, key) for key, value in items)
-        return result
-
-    def __isub__(self, that):
-        """Subtract values from `that` mapping."""
-        if isinstance(that, PriorityDict):
-            that = that._dict
-
-        if len(that) * 3 > len(self._dict):
-            self._dict -= that
-            self._list.clear()
-
-            if hexversion < 0x03000000:
-                items = self._dict.iteritems()
-            else:
-                items = iter(self._dict.items())
-
-            self._list.update((value, key) for key, value in items)
-        else:
-            for key in that:
-                if key in self._dict:
-                    value = self._dict[key]
-                    self._list.remove((value, key))
-
-            self._dict -= that
-
-            for key in that:
-                value = self._dict[key]
-                self._list.add((value, key))
+        return self._op(that, op.sub)
 
     def __and__(self, that):
         """And values from two mappings (min(v1, v2))."""
-        result = PriorityDict()
-        result._dict.update(self._dict)
-        result._dict &= that
-        if hexversion < 0x03000000:
-            items = result._dict.iteritems()
-        else:
-            items = iter(result._dict.items())
-        result._list.update((value, key) for key, value in items)
-        return result
-
-    def __iand__(self, that):
-        """And values from `that` mapping (min(v1, v2))."""
-        if isinstance(that, PriorityDict):
-            that = that._dict
-
-        if len(that) * 3 > len(self._dict):
-            self._dict &= that
-            self._list.clear()
-
-            if hexversion < 0x03000000:
-                items = self._dict.iteritems()
-            else:
-                items = iter(self._dict.items())
-
-            self._list.update((value, key) for key, value in items)
-        else:
-            for key in that:
-                if key in self._dict:
-                    value = self._dict[key]
-                    self._list.remove((value, key))
-
-            self._dict &= that
-
-            for key in that:
-                value = self._dict[key]
-                self._list.add((value, key))
+        return self._op(that, op.and_)
 
     def __or__(self, that):
         """Or values from two mappings (max(v1, v2))."""
-        result = PriorityDict()
-        result._dict.update(self._dict)
-        result._dict |= that
-        if hexversion < 0x03000000:
-            items = result._dict.iteritems()
-        else:
-            items = iter(result._dict.items())
-        result._list.update((value, key) for key, value in items)
-        return result
+        return self._op(that, op.or_)
 
-    def __ior__(self, that):
-        """Or values from `that` mapping (max(v1, v2))."""
+    def _iop(self, that, func):
         if isinstance(that, PriorityDict):
             that = that._dict
 
         if len(that) * 3 > len(self._dict):
-            self._dict |= that
+            func(self._dict, that)
             self._list.clear()
 
             if hexversion < 0x03000000:
@@ -551,11 +449,29 @@ class PriorityDict(MutableMapping):
                     value = self._dict[key]
                     self._list.remove((value, key))
 
-            self._dict |= that
+            func(self._dict, that)
 
             for key in that:
                 value = self._dict[key]
                 self._list.add((value, key))
+
+        return self
+
+    def __iadd__(self, that):
+        """Add values from `that` mapping."""
+        return self._iop(that, op.iadd)
+
+    def __isub__(self, that):
+        """Subtract values from `that` mapping."""
+        return self._iop(that, op.isub)
+
+    def __iand__(self, that):
+        """And values from `that` mapping (min(v1, v2))."""
+        return self._iop(that, op.iand)
+
+    def __ior__(self, that):
+        """Or values from `that` mapping (max(v1, v2))."""
+        return self._iop(that, op.ior)
 
     def __eq__(self, that):
         """Compare two mappings for equality."""
@@ -603,8 +519,6 @@ class PriorityDict(MutableMapping):
         assert all(key in self._dict and self._dict[key] == value
                    for value, key in self._list)
 
-#TODO: views were copied from sorteddict.py
-
 class KeysView(AbstractKeysView, Set, Sequence):
     """
     A KeysView object is a dynamic view of the dictionary's keys, which
@@ -618,7 +532,7 @@ class KeysView(AbstractKeysView, Set, Sequence):
         Initialize a KeysView from a PriorityDict container as *priority_dict*.
         """
         self._list = priority_dict._list
-        if version_info[0] == 2:
+        if hexversion < 0x03000000:
             self._view = priority_dict._dict.viewkeys()
         else:
             self._view = priority_dict._dict.keys()
@@ -634,15 +548,22 @@ class KeysView(AbstractKeysView, Set, Sequence):
     def __iter__(self):
         """
         Return an iterable over the keys in the dictionary. Keys are iterated
-        over in their sorted order.
+        over in value sorted order.
 
         Iterating views while adding or deleting entries in the dictionary may
         raise a RuntimeError or fail to iterate over all entries.
         """
         return iter(key for value, key in self._list)
     def __getitem__(self, index):
-        """Return the key at position *index*."""
-        return self._list[index][1]
+        """
+        Efficiently return key at *index* in iteration.
+
+        Supports slice notation and negative indexes.
+        """
+        if isinstance(index, slice):
+            return [key for value, key in self._list[index]]
+        else:
+            return self._list[index][1]
     def __reversed__(self):
         """
         Return a reversed iterable over the keys in the dictionary. Keys are
@@ -652,17 +573,9 @@ class KeysView(AbstractKeysView, Set, Sequence):
         raise a RuntimeError or fail to iterate over all entries.
         """
         return iter(key for value, key in reversed(self._list))
-    def index(self, value, start=None, stop=None):
-        """
-        Return the smallest *k* such that `keysview[k] == value` and `start <= k
-        < end`.  Raises `KeyError` if *value* is not present.  *stop* defaults
-        to the end of the set.  *start* defaults to the beginning.  Negative
-        indexes are supported, as for slice indices.
-        """
-        return self._list.index(value, start, stop)
-    def count(self, value):
-        """Return the number of occurrences of *value* in the set."""
-        return 1 if value in self._view else 0
+    def count(self, key):
+        """Return the number of occurrences of *key* in the set."""
+        return 1 if key in self._view else 0
     def __eq__(self, that):
         """Test set-like equality with *that*."""
         return self._view == that
@@ -682,25 +595,25 @@ class KeysView(AbstractKeysView, Set, Sequence):
         """Test whether *that* is contained within self."""
         return self._view >= that
     def __and__(self, that):
-        """Return a SortedSet of the intersection of self and *that*."""
-        return SortedSet(self._view & that)
+        """Return the intersection of self and *that*."""
+        return self._view & that
     def __or__(self, that):
-        """Return a SortedSet of the union of self and *that*."""
-        return SortedSet(self._view | that)
+        """Return the union of self and *that*."""
+        return self._view | that
     def __sub__(self, that):
-        """Return a SortedSet of the difference of self and *that*."""
-        return SortedSet(self._view - that)
+        """Return the difference of self and *that*."""
+        return self._view - that
     def __xor__(self, that):
-        """Return a SortedSet of the symmetric difference of self and *that*."""
-        return SortedSet(self._view ^ that)
+        """Return the symmetric difference of self and *that*."""
+        return self._view ^ that
     def isdisjoint(self, that):
         """Return True if and only if *that* is disjoint with self."""
         if version_info[0] == 2:
-            return not any(key in self._list for key in that)
+            return not any(key in self._view for key in that)
         else:
             return self._view.isdisjoint(that)
     def __repr__(self):
-        return 'SortedDict_keys({0})'.format(repr(list(self)))
+        return 'PriorityDict_keys({0})'.format(repr(list(self)))
 
 class ValuesView(AbstractValuesView, Sequence):
     """
@@ -710,19 +623,18 @@ class ValuesView(AbstractValuesView, Sequence):
 
     The ValuesView class implements the Sequence Abstract Base Class.
     """
-    def __init__(self, sorted_dict):
+    def __init__(self, priority_dict):
         """
-        Initialize a ValuesView from a SortedDict container as *sorted_dict*.
+        Initialize a ValuesView from a PriorityDict container as `priority_dict`.
         """
-        self._dict = sorted_dict
-        self._list = sorted_dict._list
-        if version_info[0] == 2:
-            self._view = sorted_dict._dict.viewvalues()
+        self._list = priority_dict._list
+        if hexversion < 0x03000000:
+            self._view = priority_dict._dict.viewvalues()
         else:
-            self._view = sorted_dict._dict.values()
+            self._view = priority_dict._dict.values()
     def __len__(self):
         """Return the number of entries in the dictionary."""
-        return len(self._dict)
+        return len(self._view)
     def __contains__(self, value):
         """
         Return True if and only if *value* is on the underlying dictionary's
@@ -732,12 +644,12 @@ class ValuesView(AbstractValuesView, Sequence):
     def __iter__(self):
         """
         Return an iterator over the values in the dictionary.  Values are
-        iterated over in sorted order of the keys.
+        iterated over in value sorted order.
 
         Iterating views while adding or deleting entries in the dictionary may
         raise a `RuntimeError` or fail to iterate over all entries.
         """
-        return iter(self._dict[key] for key in self._list)
+        return iter(value for value, key in self._list)
     def __getitem__(self, index):
         """
         Efficiently return value at *index* in iteration.
@@ -745,35 +657,34 @@ class ValuesView(AbstractValuesView, Sequence):
         Supports slice notation and negative indexes.
         """
         if isinstance(index, slice):
-            return [self._dict[key] for key in self._list[index]]
+            return [value for value, key in self._list[index]]
         else:
-            return self._dict[self._list[index]]
+            return self._list[index][0]
     def __reversed__(self):
         """
         Return a reverse iterator over the values in the dictionary.  Values are
-        iterated over in reverse sort order of the keys.
+        iterated over in reverse sort order of the values.
 
         Iterating views while adding or deleting entries in the dictionary may
         raise a `RuntimeError` or fail to iterate over all entries.
         """
-        return iter(self._dict[key] for key in reversed(self._list))
+        return iter(value for value, key in reversed(self._list))
     def index(self, value):
         """
         Return index of *value* in self.
 
         Raises ValueError if *value* is not found.
         """
-        for idx, val in enumerate(self):
-            if value == val:
-                return idx
-        else:
+        pos = self._list.bisect_left((value,))
+        if pos == len(self._dict) or self._list[pos][0] != value:
             raise ValueError
+        else:
+            return pos
     def count(self, value):
         """Return the number of occurrences of *value* in self."""
-        if version_info[0] == 2:
-            return sum(1 for val in self._dict.itervalues() if val == value)
-        else:
-            return sum(1 for val in self._dict.values() if val == value)
+        start = self._list.bisect_left((value,))
+        end = self._list.bisect_right((value, _Biggest))
+        return end - start
     def __lt__(self, that):
         raise TypeError
     def __gt__(self, that):
@@ -791,7 +702,7 @@ class ValuesView(AbstractValuesView, Sequence):
     def __xor__(self, that):
         raise TypeError
     def __repr__(self):
-        return 'SortedDict_values({0})'.format(repr(list(self)))
+        return 'PriorityDict_values({0})'.format(repr(list(self)))
 
 class ItemsView(AbstractItemsView, Set, Sequence):
     """
@@ -803,66 +714,49 @@ class ItemsView(AbstractItemsView, Set, Sequence):
     However, the set-like operations (``&``, ``|``, ``-``, ``^``) will only
     operate correctly if all of the dictionary's values are hashable.
     """
-    def __init__(self, sorted_dict):
+    def __init__(self, priority_dict):
         """
-        Initialize an ItemsView from a SortedDict container as *sorted_dict*.
+        Initialize an ItemsView from a PriorityDict container as `priority_dict`.
         """
-        self._dict = sorted_dict
-        self._list = sorted_dict._list
-        if version_info[0] == 2:
-            self._view = sorted_dict._dict.viewitems()
+        self._list = priority_dict._list
+        if hexversion < 0x03000000:
+            self._view = priority_dict._dict.viewitems()
         else:
-            self._view = sorted_dict._dict.items()
+            self._view = priority_dict._dict.items()
     def __len__(self):
         """Return the number of entries in the dictionary."""
         return len(self._view)
-    def __contains__(self, key):
+    def __contains__(self, item):
         """
-        Return True if and only if *key* is one of the underlying dictionary's
+        Return True if and only if *item* is one of the underlying dictionary's
         items.
         """
-        return key in self._view
+        return item in self._view
     def __iter__(self):
         """
         Return an iterable over the items in the dictionary. Items are iterated
-        over in their sorted order.
+        over in value sorted order.
 
         Iterating views while adding or deleting entries in the dictionary may
         raise a RuntimeError or fail to iterate over all entries.
         """
-        return iter((key, self._dict[key]) for key in self._list)
+        return iter((key, value) for value, key in self._list)
     def __getitem__(self, index):
         """Return the item as position *index*."""
         if isinstance(index, slice):
-            return [(key, self._dict[key]) for key in self._list[index]]
+            return [(key, value) for value, key in self._list[index]]
         else:
-            key = self._list[index]
-            return (key, self._dict[key])
+            value, key  = self._list[index]
+            return (key, value)
     def __reversed__(self):
         """
         Return a reversed iterable over the items in the dictionary. Items are
-        iterated over in their reverse sort order.
+        iterated over in reverse value sort order.
 
         Iterating views while adding or deleting entries in the dictionary may
         raise a RuntimeError or fail to iterate over all entries.
         """
-        return iter((key, self._dict[key]) for key in reversed(self._list))
-    def index(self, key, start=None, stop=None):
-        """
-        Return the smallest *k* such that `itemssview[k] == key` and `start <= k
-        < end`.  Raises `KeyError` if *key* is not present.  *stop* defaults
-        to the end of the set.  *start* defaults to the beginning.  Negative
-        indexes are supported, as for slice indices.
-        """
-        pos = self._list.index(key[0], start, stop)
-        if key[1] == self._dict[key[0]]:
-            return pos
-        else:
-            raise ValueError
-    def count(self, item):
-        """Return the number of occurrences of *item* in the set."""
-        key, value = item
-        return 1 if key in self._dict and self._dict[key] == value else 0
+        return iter((key, value) for value, key in reversed(self._list))
     def __eq__(self, that):
         """Test set-like equality with *that*."""
         return self._view == that
@@ -882,25 +776,25 @@ class ItemsView(AbstractItemsView, Set, Sequence):
         """Test whether *that* is contained within self."""
         return self._view >= that
     def __and__(self, that):
-        """Return a SortedSet of the intersection of self and *that*."""
-        return SortedSet(self._view & that)
+        """Return the intersection of self and *that*."""
+        return self._view & that
     def __or__(self, that):
-        """Return a SortedSet of the union of self and *that*."""
-        return SortedSet(self._view | that)
+        """Return the union of self and *that*."""
+        return self._view | that
     def __sub__(self, that):
-        """Return a SortedSet of the difference of self and *that*."""
-        return SortedSet(self._view - that)
+        """Return the difference of self and *that*."""
+        return self._view - that
     def __xor__(self, that):
-        """Return a SortedSet of the symmetric difference of self and *that*."""
-        return SortedSet(self._view ^ that)
+        """Return the symmetric difference of self and *that*."""
+        return self._view ^ that
     def isdisjoint(self, that):
         """Return True if and only if *that* is disjoint with self."""
-        if version_info[0] == 2:
-            for key, value in that:
-                if key in self._dict and self._dict[key] == value:
+        if hexversion < 0x03000000:
+            for item in that:
+                if item in self._view:
                     return False
             return True
         else:
             return self._view.isdisjoint(that)
     def __repr__(self):
-        return 'SortedDict_items({0})'.format(repr(list(self)))
+        return 'PriorityDict_items({0})'.format(repr(list(self)))
