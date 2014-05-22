@@ -4,8 +4,21 @@
 PriorityDict Implementation
 ===========================
 
+* TODO review views (and abc impls)
+* TODO update docs
+
 PriorityDict is an Apache2 licensed implementation of a dictionary which
 maintains key-value pairs in value sort order.
+
+Compared with Counter
+---------------------
+
+* d.index(key) -> position
+* d.bisect(value) -> position
+* d.clean(value=0) rather than "+ Counter()"
+* d.tally() rather than update(), update shares dict semantics
+* Provides PriorityDict.count(...) for counter compatibility
+* PriorityDict({0: 'a'}) + PriorityDict({1: 'b', 2: 'c'}) works
 """
 
 from sortedcontainers import SortedList
@@ -19,7 +32,11 @@ from functools import wraps
 from itertools import chain, repeat
 from sys import hexversion
 
-import operator as op
+def iter_items(dict_):
+    if hexversion < 0x03000000:
+        return dict_.iteritems()
+    else:
+        return iter(dict_.items())
 
 _NotGiven = object()
 
@@ -65,25 +82,26 @@ class _IlocWrapper:
         negative indices and slice notation. Raises IndexError on invalid
         *index*.
         """
+        _list = self._dict._list
         if isinstance(index, slice):
-            return [tup[1] for tup in self._dict._list[index]]
+            return [key for value, key in _list[index]]
         else:
-            return self._dict._list[index][1]
+            return _list[index][1]
 
     def __delitem__(self, index):
         """
         Remove the ``sdict[sdict.iloc[index]]`` from *sdict*. Supports negative
         indices and slice notation. Raises IndexError on invalid *index*.
         """
+        _list, _dict = self._dict._list, self._dict._dict
         if isinstance(index, slice):
-            keys = [tup[1] for tup in self._dict._list[index]]
-            del self._dict._list[index]
-            for key in keys:
-                del self._dict._dict[key]
+            for key in (key for value, key in _list[index]):
+                del _dict[key]
+            del _list[index]
         else:
-            key = self._dict._list[index][1]
-            del self._dict._list[index]
-            del self._dict._dict[key]
+            key = _list[index][1]
+            del _list[index]
+            del _dict[key]
 
 class PriorityDict(MutableMapping):
     """
@@ -118,7 +136,7 @@ class PriorityDict(MutableMapping):
         The first example only works for keys that are valid Python
         identifiers; the others work with any valid keys.
         """
-        self._dict = Counter()
+        self._dict = dict()
         self._list = SortedList()
         self.iloc = _IlocWrapper(self)
         self.update(*args, **kwargs)
@@ -127,6 +145,17 @@ class PriorityDict(MutableMapping):
         """Remove all elements from the dictionary."""
         self._dict.clear()
         self._list.clear()
+
+    def clean(self, value=0):
+        """
+        Remove all items with value less than `value`.
+        Default value is 0.
+        """
+        _list, _dict = self._dict._list, self._dict._dict
+        pos = self.bisect(value)
+        for key in (key for value, key in _list[pos:]):
+            del _dict[key]
+        del _list[pos:]
 
     def __contains__(self, key):
         """Return True if and only if *key* is in the dictionary."""
@@ -153,14 +182,14 @@ class PriorityDict(MutableMapping):
         Create an iterator over the keys of the dictionary ordered by the value
         sort order.
         """
-        return iter(tup[1] for tup in self._list)
+        return iter(key for value, key in self._list)
 
     def __reversed__(self):
         """
         Create an iterator over the keys of the dictionary ordered by the
         reversed value sort order.
         """
-        return iter(tup[1] for tup in reversed(self._list))
+        return iter(key for value, key in reversed(self._list))
 
     def __len__(self):
         """Return the number of (key, value) pairs in the dictionary."""
@@ -169,8 +198,8 @@ class PriorityDict(MutableMapping):
     def __setitem__(self, key, value):
         """Set `d[key]` to *value*."""
         if key in self._dict:
-            value = self._dict[key]
-            self._list.remove((value, key))
+            old_value = self._dict[key]
+            self._list.remove((old_value, key))
         self._list.add((value, key))
         self._dict[key] = value
 
@@ -185,8 +214,8 @@ class PriorityDict(MutableMapping):
     @classmethod
     def fromkeys(cls, iterable, value=0):
         """
-        Create a new dictionary with keys from *iterable* and values set to
-        *value*. The default *value* is 0.
+        Create a new dictionary with keys from `iterable` and values set to
+        `value`. The default *value* is 0.
         """
         return PriorityDict((key, value) for key in iterable)
 
@@ -326,7 +355,7 @@ class PriorityDict(MutableMapping):
         count. Elements are returned in value sort-order. If an element’s count
         is less than one, elements() will ignore it.
         """
-        values = (repeat(tup[1], tup[0]) for tup in self._list)
+        values = (repeat(key, value) for value, key in self._list)
         return chain.from_iterable(values)
 
     def most_common(self, count=None):
@@ -335,14 +364,16 @@ class PriorityDict(MutableMapping):
         priority. If `count` is not specified, `most_common` returns *all*
         elements in the dict. Elements with equal counts are ordered by key.
         """
-        end = len(self._dict)
+        _list, _dict = self._list, self._dict
 
         if count is None:
-            count = end
+            return [(key, value) for value, key in reversed(_list)]
 
-        start = end - count
+        end = len(_dict) - 1
+        start = max(end - count, -1)
 
-        return [(tup[1], tup[0]) for tup in self._list[start:end:-1]]
+        items = (_list[pos] for pos in xrange(end, start, -1))
+        return [(key, value) for value, key in items]
 
     def subtract(self, elements):
         """
@@ -352,7 +383,7 @@ class PriorityDict(MutableMapping):
         """
         self -= Counter(elements)
 
-    def update(self, *args, **kwargs):
+    def tally(self, *args, **kwargs):
         """
         Elements are counted from an iterable or added-in from another mapping
         (or counter). Like dict.update() but adds counts instead of replacing
@@ -361,6 +392,37 @@ class PriorityDict(MutableMapping):
         """
         self += Counter(*args, **kwargs)
 
+    @classmethod
+    def count(self, *args, **kwargs):
+        """
+        Consume `args` and `kwargs` with a Counter and use that mapping to
+        initialize a PriorityDict.
+        """
+        return PriorityDict(Counter(*args, **kwargs))
+
+    def update(self, *args, **kwargs):
+        """
+        Update the dictionary with the key/value pairs from *other*, overwriting
+        existing keys.
+
+        *update* accepts either another dictionary object or an iterable of
+        key/value pairs (as a tuple or other iterable of length two).  If
+        keyword arguments are specified, the dictionary is then updated with
+        those key/value pairs: ``d.update(red=1, blue=2)``.
+        """
+        _list, _dict = self._list, self._dict
+        items = dict(*args, **kwargs)
+        if (10 * len(items)) > len(_dict):
+            _dict.update(items)
+            _list.clear()
+            _list.update((value, key) for key, value in iter_items(_dict))
+        else:
+            for key, value in iter_items(items):
+                old_value = _dict[key]
+                _list.remove((old_value, key))
+                _dict[key] = value
+                _list.add((value, key))
+
     def index(self, key):
         """
         Return the smallest *k* such that `d.iloc[k] == key`.  Raises KeyError
@@ -368,17 +430,6 @@ class PriorityDict(MutableMapping):
         """
         value = self._dict[key]
         return self._list.index((value, key))
-
-    def index_value(self, value):
-        """
-        Return the smallest *k* such that `d[d.iloc[k]] == value`. Raises
-        ValueError if *value* is not present.
-        """
-        pos = self._list.bisect_left((value,))
-        if pos == len(self._dict) or self._list[pos][0] != value:
-            raise ValueError
-        else:
-            return pos
 
     def bisect_left(self, value):
         """
@@ -399,79 +450,79 @@ class PriorityDict(MutableMapping):
         PriorityDict, the insertion point will be after (to the right
         of) any existing entries.
         """
-        # TODO: test with multiple equal values
         return self._list.bisect_right((value, _Biggest))
 
-    def _op(self, that, func):
-        result = PriorityDict()
-        result._dict.update(self._dict)
-        func(result._dict, that)
-        if hexversion < 0x03000000:
-            items = result._dict.iteritems()
-        else:
-            items = iter(result._dict.items())
-        result._list.update((value, key) for key, value in items)
-        return result
-
-    def __add__(self, that):
-        """Add values from two mappings."""
-        return self._op(that, op.add)
-
-    def __sub__(self, that):
-        """Subtract values from two mappings."""
-        return self._op(that, op.sub)
-
-    def __and__(self, that):
-        """And values from two mappings (min(v1, v2))."""
-        return self._op(that, op.and_)
-
-    def __or__(self, that):
-        """Or values from two mappings (max(v1, v2))."""
-        return self._op(that, op.or_)
-
     def _iop(self, that, func):
-        if isinstance(that, PriorityDict):
-            that = that._dict
-
-        if len(that) * 3 > len(self._dict):
-            func(self._dict, that)
-            self._list.clear()
-
-            if hexversion < 0x03000000:
-                items = self._dict.iteritems()
-            else:
-                items = iter(self._dict.items())
-
-            self._list.update((value, key) for key, value in items)
+        _list, _dict = self._list, self._dict
+        if len(_dict) == 0:
+            _dict.update(that)
+            _list.update((value, key) for key, value in iter_items(_dict))
+        elif len(that) * 3 > len(_dict):
+            _list.clear()
+            for key, value in iter_items(that):
+                if key in _dict:
+                    func(_dict, key, value)
+                else:
+                    _dict[key] = value
+            _list.update((value, key) for key, value in iter_items(_dict))
         else:
-            for key in that:
-                if key in self._dict:
-                    value = self._dict[key]
-                    self._list.remove((value, key))
-
-            func(self._dict, that)
-
-            for key in that:
-                value = self._dict[key]
-                self._list.add((value, key))
-
+            for key, value in iter_items(that):
+                if key in _dict:
+                    old_value = _dict[key]
+                    _list.remove((old_value, key))
+                    func(_dict, key, value)
+                else:
+                    _dict[key] = value
+                _list.add((value, key))
         return self
 
     def __iadd__(self, that):
         """Add values from `that` mapping."""
-        return self._iop(that, op.iadd)
+        def func(_dict, key, value):
+            _dict[key] += value
+        return self._iop(that, func)
 
     def __isub__(self, that):
         """Subtract values from `that` mapping."""
-        return self._iop(that, op.isub)
+        def func(_dict, key, value):
+            _dict[key] -= value
+        return self._iop(that, func)
 
     def __iand__(self, that):
         """And values from `that` mapping (min(v1, v2))."""
-        return self._iop(that, op.iand)
+        def func(_dict, key, value):
+            _dict[key] = min(_dict[key], value)
+        return self._iop(that, func)
 
     def __ior__(self, that):
         """Or values from `that` mapping (max(v1, v2))."""
-        return self._iop(that, op.ior)
+        def func(_dict, key, value):
+            _dict[key] = max(_dict[key], value)
+        return self._iop(that, func)
+
+    def __add__(self, that):
+        """Add values from this and `that` mapping."""
+        result = PriorityDict(self)
+        result += that
+        return result
+
+    def __sub__(self, that):
+        """Subtract values from this and `that` mapping."""
+        result = PriorityDict(self)
+        result -= that
+        return result
+
+    def __and__(self, that):
+        """And values from this and `that` mapping."""
+        result = PriorityDict(self)
+        result &= that
+        return result
+
+    def __or__(self, that):
+        """Or values from this and `that` mapping."""
+        result = PriorityDict(self)
+        result |= that
+        return result
 
     def __eq__(self, that):
         """Compare two mappings for equality."""
@@ -489,25 +540,39 @@ class PriorityDict(MutableMapping):
         """Compare two mappings for less than."""
         if isinstance(that, PriorityDict):
             that = that._dict
-        return self._dict < that
+        _dict = self._dict
+        return (_dict != that and self <= that)
 
     def __le__(self, that):
         """Compare two mappings for less than equal."""
         if isinstance(that, PriorityDict):
             that = that._dict
-        return self._dict <= that
+        _dict = self._dict
+        return (len(_dict) <= len(that) and
+                all(key in _dict and _dict[key] <= that[key] for key in that))
 
     def __gt__(self, that):
         """Compare two mappings for greater than."""
         if isinstance(that, PriorityDict):
             that = that._dict
-        return self._dict > that
+        _dict = self._dict
+        return (_dict != that and self >= that)
 
     def __ge__(self, that):
         """Compare two mappings for greater than equal."""
         if isinstance(that, PriorityDict):
             that = that._dict
-        return self._dict >= that
+        _dict = self._dict
+        return (len(_dict) >= len(that) and
+                all(key in _dict and _dict[key] >= that[key] for key in that))
+
+    def isdisjoint(self, that):
+        """
+        Return True if no key in `self` is also in `that`.
+        This doesn't check that the value is greater than zero.
+        To remove keys with value less than or equal to zero see *clean*.
+        """
+        return not any(key in self for key in that)
 
     def __repr__(self):
         """Return string representation of PriorityDict."""
