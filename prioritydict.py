@@ -4,8 +4,10 @@
 PriorityDict Implementation
 ===========================
 
+* TODO collections.Counter uses inequality rather than min/max for operators
 * TODO review views (and abc impls)
 * TODO update docs
+* TODO test correct exception types raised on errors
 
 PriorityDict is an Apache2 licensed implementation of a dictionary which
 maintains key-value pairs in value sort order.
@@ -16,9 +18,12 @@ Compared with Counter
 * d.index(key) -> position
 * d.bisect(value) -> position
 * d.clean(value=0) rather than "+ Counter()"
-* d.tally() rather than update(), update shares dict semantics
+  * Permits negative and zero counts after operations
+* d.tally() rather than update(), update uses dict semantics
 * Provides PriorityDict.count(...) for counter compatibility
 * PriorityDict({0: 'a'}) + PriorityDict({1: 'b', 2: 'c'}) works
+* Set-like subtraction, addition operators
+* Set-like comparison operators
 """
 
 from sortedcontainers import SortedList
@@ -148,14 +153,14 @@ class PriorityDict(MutableMapping):
 
     def clean(self, value=0):
         """
-        Remove all items with value less than `value`.
-        Default value is 0.
+        Remove all items with value less than or equal to `value`.
+        Default `value` is 0.
         """
-        _list, _dict = self._dict._list, self._dict._dict
-        pos = self.bisect(value)
-        for key in (key for value, key in _list[pos:]):
+        _list, _dict = self._list, self._dict
+        pos = self.bisect_right(value)
+        for key in (key for value, key in _list[:pos]):
             del _dict[key]
-        del _list[pos:]
+        del _list[:pos]
 
     def __contains__(self, key):
         """Return True if and only if *key* is in the dictionary."""
@@ -231,85 +236,6 @@ class PriorityDict(MutableMapping):
         """Return True if and only in *key* is in the dictionary."""
         return key in self._dict
 
-    def items(self):
-        """
-        In Python 2, returns a list of the dictionary's items (``(key, value)``
-        pairs).
-
-        In Python 3, returns a new ItemsView of the dictionary's items.  In
-        addition to the methods provided by the built-in `view` the ItemsView is
-        indexable (e.g., ``d.items()[5]``).
-        """
-        if hexversion < 0x03000000:
-            return list((key, value) for value, key in self._list)
-        else:
-            return ItemsView(self)
-
-    def iteritems(self):
-        """Return an iterable over the items (``(key, value)`` pairs)."""
-        return iter((key, value) for value, key in self._list)
-
-    @not26
-    def viewitems(self):
-        """
-        In Python 2.7 and later, return a new `ItemsView` of the dictionary's
-        items.
-
-        In Python 2.6, raise a NotImplementedError.
-        """
-        return ItemsView(self)
-
-    def keys(self):
-        """
-        In Python 2, return a list of the dictionary's keys.
-
-        In Python 3, return a new KeysView of the dictionary's keys.  In
-        addition to the methods provided by the built-in `view` the KeysView is
-        indexable (e.g., ``d.keys()[5]``).
-        """
-        if hexversion < 0x03000000:
-            return list(key for value, key in self._list)
-        else:
-            return KeysView(self)
-
-    def iterkeys(self):
-        """Return an iterable over the keys of the dictionary."""
-        return iter(key for value, key in self._list)
-
-    @not26
-    def viewkeys(self):
-        """
-        In Python 2.7 and later, return a new `KeysView` of the dictionary's
-        keys.
-
-        In Python 2.6, raise a NotImplementedError.
-        """
-        return KeysView(self)
-
-    def values(self):
-        """
-        In Python 2, return a list of the dictionary's values.
-
-        In Python 3, return a new :class:`ValuesView` of the dictionary's
-        values.  In addition to the methods provided by the built-in `view`
-        the ValuesView is indexable (e.g., ``d.values()[5]``).
-        """
-        return list(value for value, key in self._list)
-
-    def itervalues(self):
-        """Return an iterable over the values of the dictionary."""
-        return iter(value for value, key in self._list)
-
-    @not26
-    def viewvalues(self):
-        """
-        In Python 2.7 and later, return a new `ValuesView` of the dictionary's
-        values.
-
-        In Python 2.6, raise a NotImplementedError.
-        """
-        return ValuesView(self)
-    
     def pop(self, key, default=_NotGiven):
         """
         If *key* is in the dictionary, remove it and return its value,
@@ -452,7 +378,8 @@ class PriorityDict(MutableMapping):
         """
         return self._list.bisect_right((value, _Biggest))
 
-    def _iop(self, that, func):
+    def __iadd__(self, that):
+        """Add values from `that` mapping."""
         _list, _dict = self._list, self._dict
         if len(_dict) == 0:
             _dict.update(that)
@@ -461,7 +388,7 @@ class PriorityDict(MutableMapping):
             _list.clear()
             for key, value in iter_items(that):
                 if key in _dict:
-                    func(_dict, key, value)
+                    _dict[key] += value
                 else:
                     _dict[key] = value
             _list.update((value, key) for key, value in iter_items(_dict))
@@ -470,58 +397,125 @@ class PriorityDict(MutableMapping):
                 if key in _dict:
                     old_value = _dict[key]
                     _list.remove((old_value, key))
-                    func(_dict, key, value)
-                else:
-                    _dict[key] = value
+                    value = old_value + value
+                _dict[key] = value
                 _list.add((value, key))
         return self
 
-    def __iadd__(self, that):
-        """Add values from `that` mapping."""
-        def func(_dict, key, value):
-            _dict[key] += value
-        return self._iop(that, func)
-
     def __isub__(self, that):
         """Subtract values from `that` mapping."""
-        def func(_dict, key, value):
-            _dict[key] -= value
-        return self._iop(that, func)
-
-    def __iand__(self, that):
-        """And values from `that` mapping (min(v1, v2))."""
-        def func(_dict, key, value):
-            _dict[key] = min(_dict[key], value)
-        return self._iop(that, func)
+        _list, _dict = self._list, self._dict
+        if len(_dict) == 0:
+            _dict.clear()
+            _list.clear()
+        elif len(that) * 3 > len(_dict):
+            _list.clear()
+            for key, value in iter_items(that):
+                if key in _dict:
+                    _dict[key] -= value
+            _list.update((value, key) for key, value in iter_items(_dict))
+        else:
+            for key, value in iter_items(that):
+                if key in _dict:
+                    old_value = _dict[key]
+                    _list.remove((old_value, key))
+                    value = old_value - value
+                    _dict[key] = value
+                    _list.add((value, key))
+        return self
 
     def __ior__(self, that):
         """Or values from `that` mapping (max(v1, v2))."""
-        def func(_dict, key, value):
-            _dict[key] = max(_dict[key], value)
-        return self._iop(that, func)
+        _list, _dict = self._list, self._dict
+        if len(_dict) == 0:
+            _dict.update(that)
+            _list.update((value, key) for key, value in iter_items(_dict))
+        elif len(that) * 3 > len(_dict):
+            _list.clear()
+            for key, value in iter_items(that):
+                if key in _dict:
+                    _dict[key] = max(_dict[key], value)
+                else:
+                    _dict[key] = value
+            _list.update((value, key) for key, value in iter_items(_dict))
+        else:
+            for key, value in iter_items(that):
+                if key in _dict:
+                    old_value = _dict[key]
+                    _list.remove((old_value, key))
+                    value = max(old_value, value)
+                _dict[key] = value
+                _list.add((value, key))
+        return self
+
+    def __iand__(self, that):
+        """And values from `that` mapping (min(v1, v2))."""
+        _list, _dict = self._list, self._dict
+        if len(_dict) == 0:
+            _dict.clear()
+            _list.clear()
+        elif len(that) * 3 > len(_dict):
+            _list.clear()
+            for key, value in iter_items(that):
+                if key in _dict:
+                    _dict[key] = min(_dict[key], value)
+            _list.update((value, key) for key, value in iter_items(_dict))
+        else:
+            for key, value in iter_items(that):
+                if key in _dict:
+                    old_value = _dict[key]
+                    _list.remove((old_value, key))
+                    value = min(old_value, value)
+                    _dict[key] = value
+                    _list.add((value, key))
+        return self
 
     def __add__(self, that):
         """Add values from this and `that` mapping."""
-        result = PriorityDict(self)
-        result += that
+        result = PriorityDict()
+        _list, _dict = result._list, result._dict
+        _dict.update(self._dict)
+        for key, value in iter_items(that):
+            if key in _dict:
+                _dict[key] += value
+            else:
+                _dict[key] = value
+        _list.update((value, key) for key, value in iter_items(_dict))
         return result
 
     def __sub__(self, that):
-        """Subtract values from this and `that` mapping."""
-        result = PriorityDict(self)
-        result -= that
-        return result
-
-    def __and__(self, that):
-        """And values from this and `that` mapping."""
-        result = PriorityDict(self)
-        result &= that
+        """Subtract values in `that` mapping from this."""
+        result = PriorityDict()
+        _list, _dict = result._list, result._dict
+        _dict.update(self._dict)
+        for key, value in iter_items(that):
+            if key in _dict:
+                _dict[key] -= value
+        _list.update((value, key) for key, value in iter_items(_dict))
         return result
 
     def __or__(self, that):
         """Or values from this and `that` mapping."""
-        result = PriorityDict(self)
-        result |= that
+        result = PriorityDict()
+        _list, _dict = result._list, result._dict
+        _dict.update(self._dict)
+        for key, value in iter_items(that):
+            if key in _dict:
+                _dict[key] = max(_dict[key], value)
+            else:
+                _dict[key] = value
+        _list.update((value, key) for key, value in iter_items(_dict))
+        return result
+
+    def __and__(self, that):
+        """And values from this and `that` mapping."""
+        result = PriorityDict()
+        _list, _dict = result._list, result._dict
+        _dict.update(self._dict)
+        for key, value in iter_items(that):
+            if key in _dict:
+                _dict[key] = min(_dict[key], value)
+        _list.update((value, key) for key, value in iter_items(_dict))
         return result
 
     def __eq__(self, that):
@@ -549,7 +543,8 @@ class PriorityDict(MutableMapping):
             that = that._dict
         _dict = self._dict
         return (len(_dict) <= len(that) and
-                all(key in _dict and _dict[key] <= that[key] for key in that))
+                all(_dict[key] <= that[key] if key in that else False
+                    for key in _dict))
 
     def __gt__(self, that):
         """Compare two mappings for greater than."""
@@ -564,7 +559,8 @@ class PriorityDict(MutableMapping):
             that = that._dict
         _dict = self._dict
         return (len(_dict) >= len(that) and
-                all(key in _dict and _dict[key] >= that[key] for key in that))
+                all(_dict[key] >= that[key] if key in _dict else False
+                    for key in that))
 
     def isdisjoint(self, that):
         """
@@ -573,6 +569,85 @@ class PriorityDict(MutableMapping):
         To remove keys with value less than or equal to zero see *clean*.
         """
         return not any(key in self for key in that)
+
+    def items(self):
+        """
+        In Python 2, returns a list of the dictionary's items (``(key, value)``
+        pairs).
+
+        In Python 3, returns a new ItemsView of the dictionary's items.  In
+        addition to the methods provided by the built-in `view` the ItemsView is
+        indexable (e.g., ``d.items()[5]``).
+        """
+        if hexversion < 0x03000000:
+            return list((key, value) for value, key in self._list)
+        else:
+            return ItemsView(self)
+
+    def iteritems(self):
+        """Return an iterable over the items (``(key, value)`` pairs)."""
+        return iter((key, value) for value, key in self._list)
+
+    @not26
+    def viewitems(self):
+        """
+        In Python 2.7 and later, return a new `ItemsView` of the dictionary's
+        items.
+
+        In Python 2.6, raise a NotImplementedError.
+        """
+        return ItemsView(self)
+
+    def keys(self):
+        """
+        In Python 2, return a list of the dictionary's keys.
+
+        In Python 3, return a new KeysView of the dictionary's keys.  In
+        addition to the methods provided by the built-in `view` the KeysView is
+        indexable (e.g., ``d.keys()[5]``).
+        """
+        if hexversion < 0x03000000:
+            return list(key for value, key in self._list)
+        else:
+            return KeysView(self)
+
+    def iterkeys(self):
+        """Return an iterable over the keys of the dictionary."""
+        return iter(key for value, key in self._list)
+
+    @not26
+    def viewkeys(self):
+        """
+        In Python 2.7 and later, return a new `KeysView` of the dictionary's
+        keys.
+
+        In Python 2.6, raise a NotImplementedError.
+        """
+        return KeysView(self)
+
+    def values(self):
+        """
+        In Python 2, return a list of the dictionary's values.
+
+        In Python 3, return a new :class:`ValuesView` of the dictionary's
+        values.  In addition to the methods provided by the built-in `view`
+        the ValuesView is indexable (e.g., ``d.values()[5]``).
+        """
+        return list(value for value, key in self._list)
+
+    def itervalues(self):
+        """Return an iterable over the values of the dictionary."""
+        return iter(value for value, key in self._list)
+
+    @not26
+    def viewvalues(self):
+        """
+        In Python 2.7 and later, return a new `ValuesView` of the dictionary's
+        values.
+
+        In Python 2.6, raise a NotImplementedError.
+        """
+        return ValuesView(self)
 
     def __repr__(self):
         """Return string representation of PriorityDict."""
