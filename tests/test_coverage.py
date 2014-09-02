@@ -97,7 +97,7 @@ def test_copy():
     this = PriorityDict({'a': 0, 'b': 1, 'c': 2, 'd': 3})
     that = this.copy()
     del this['d']
-    assert len(that) == 3
+    assert len(that) == 4
     this._check()
     that._check()
 

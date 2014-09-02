@@ -4,8 +4,9 @@
 PriorityDict Implementation
 ===========================
 
-* TODO collections.Counter uses inequality rather than min/max for operators
-* TODO review views (and abc impls)
+* TODO review views
+* TODO shouldn't most_common use slice?
+* TODO review abc impls
 * TODO update docs
 * TODO test correct exception types raised on errors
 
@@ -210,11 +211,7 @@ class PriorityDict(MutableMapping):
 
     def copy(self):
         """Create a shallow copy of the dictionary."""
-        that = PriorityDict()
-        that._dict = self._dict
-        that._list = self._list
-        that.iloc = self.iloc
-        return that
+        return PriorityDict(self)
 
     @classmethod
     def fromkeys(cls, iterable, value=0):
@@ -298,6 +295,8 @@ class PriorityDict(MutableMapping):
         end = len(_dict) - 1
         start = max(end - count, -1)
 
+        # TODO: Shouldn't we slice?
+
         items = (_list[pos] for pos in xrange(end, start, -1))
         return [(key, value) for value, key in items]
 
@@ -351,7 +350,7 @@ class PriorityDict(MutableMapping):
 
     def index(self, key):
         """
-        Return the smallest *k* such that `d.iloc[k] == key`.  Raises KeyError
+        Return the smallest *i* such that `d.iloc[i] == key`.  Raises KeyError
         if *key* is not present.
         """
         value = self._dict[key]
@@ -434,7 +433,8 @@ class PriorityDict(MutableMapping):
             _list.clear()
             for key, value in iter_items(that):
                 if key in _dict:
-                    _dict[key] = max(_dict[key], value)
+                    old_value = _dict[key]
+                    _dict[key] = old_value if old_value > value else value
                 else:
                     _dict[key] = value
             _list.update((value, key) for key, value in iter_items(_dict))
@@ -443,7 +443,7 @@ class PriorityDict(MutableMapping):
                 if key in _dict:
                     old_value = _dict[key]
                     _list.remove((old_value, key))
-                    value = max(old_value, value)
+                    value = old_value if old_value > value else value
                 _dict[key] = value
                 _list.add((value, key))
         return self
@@ -458,14 +458,15 @@ class PriorityDict(MutableMapping):
             _list.clear()
             for key, value in iter_items(that):
                 if key in _dict:
-                    _dict[key] = min(_dict[key], value)
+                    old_value = _dict[key]
+                    _dict[key] = old_value if old_value < value else value
             _list.update((value, key) for key, value in iter_items(_dict))
         else:
             for key, value in iter_items(that):
                 if key in _dict:
                     old_value = _dict[key]
                     _list.remove((old_value, key))
-                    value = min(old_value, value)
+                    value = old_value if old_value < value else value
                     _dict[key] = value
                     _list.add((value, key))
         return self
@@ -501,7 +502,8 @@ class PriorityDict(MutableMapping):
         _dict.update(self._dict)
         for key, value in iter_items(that):
             if key in _dict:
-                _dict[key] = max(_dict[key], value)
+                old_value = _dict[key]
+                _dict[key] = old_value if old_value > value else value
             else:
                 _dict[key] = value
         _list.update((value, key) for key, value in iter_items(_dict))
@@ -514,7 +516,8 @@ class PriorityDict(MutableMapping):
         _dict.update(self._dict)
         for key, value in iter_items(that):
             if key in _dict:
-                _dict[key] = min(_dict[key], value)
+                old_value = _dict[key]
+                _dict[key] = old_value if old_value < value else value
         _list.update((value, key) for key, value in iter_items(_dict))
         return result
 
