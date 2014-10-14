@@ -50,6 +50,40 @@ def test_getitem():
         assert temp[pos] == letter
     temp._check()
 
+def test_iloc():
+    temp = PriorityDict(enumerate(string.lowercase))
+    assert len(temp.iloc) == len(string.lowercase)
+
+def test_iloc_getitem():
+    temp = PriorityDict(enumerate(string.lowercase))
+    for pos, letter in enumerate(string.lowercase):
+        assert temp[temp.iloc[pos]] == letter
+    temp._check()
+
+def test_iloc_getitem_slice():
+    temp = PriorityDict(enumerate(string.lowercase))
+    that = list(enumerate(string.lowercase))
+    assert temp.iloc[5:20:3] == list(len(string.lowercase))[5:20:3]
+
+def test_iloc_delitem():
+    temp = PriorityDict(enumerate(string.lowercase))
+    that = list(enumerate(string.lowercase))
+
+    while len(temp) > 0:
+        pos = rand(len(temp))
+        del that[pos]
+        del temp.iloc[pos]
+        assert temp.items() == that
+        temp._check()
+
+def test_iloc_delitem_slice():
+    temp = PriorityDict(enumerate(string.lowercase))
+    that = list(enumerate(string.lowercase))
+    del temp.iloc[5:20:3]
+    del that[5:20:3]
+    assert temp.items() == that
+    temp._check()
+
 def test_iter():
     temp = PriorityDict((val, key) for key, val in enumerate(string.lowercase))
     assert list(iter(temp)) == list(string.lowercase)
