@@ -5,15 +5,10 @@ PriorityDict Implementation
 ===========================
 
 * TODO test correct exception types raised on errors
-<<<<<<< HEAD
 * TODO What if keys are not orderable?
   * TODO User Pair rather than _Biggest
 * TODO order values by key
-=======
-* TODO test stress
-* TODO test slwk
 * TODO update docs
->>>>>>> 2f3070a7de34a79de9283e8bfcd9729581517992
 
 PriorityDict is an Apache2 licensed implementation of a dictionary which
 maintains key-value pairs in value sort order.
