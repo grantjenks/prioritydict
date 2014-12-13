@@ -26,15 +26,17 @@ Compared with Counter
 * Set-like comparison operators
 """
 
-from sortedcontainers import SortedList, SortedListWithKey
+from sortedcontainers import SortedListWithKey
 
 from collections import Counter, MutableMapping
 
 from functools import wraps
+from operator import itemgetter
 from itertools import chain, repeat
 from sys import hexversion
 
 if hexversion < 0x03000000:
+    from itertools import imap as map
     def iteritems(_dict):
         return _dict.iteritems()
 else:
@@ -42,23 +44,6 @@ else:
         return _dict.items()
 
 _NotGiven = object()
-
-class _Biggest:
-    """An object that is greater than all others."""
-    def __gt__(self, that):
-        return True
-    def __ge__(self, that):
-        return True
-    def __lt__(self, that):
-        return False
-    def __le__(self, that):
-        return False
-    def __eq__(self, that):
-        return False
-    def __ne__(self, that):
-        return True
-
-_Biggest = _Biggest()
 
 def not26(func):
     """Function decorator for methods not implemented in Python 2.6."""
@@ -87,9 +72,9 @@ class _IlocWrapper:
         """
         _list = self._dict._list
         if isinstance(index, slice):
-            return [key for value, key in _list[index]]
+            return [tup[0] for tup in _list[index]]
         else:
-            return _list[index][1]
+            return _list[index][0]
 
     def __delitem__(self, index):
         """
@@ -98,11 +83,11 @@ class _IlocWrapper:
         """
         _list, _dict = self._dict._list, self._dict._dict
         if isinstance(index, slice):
-            for key in (key for value, key in _list[index]):
-                del _dict[key]
+            for tup in _list[index]:
+                del _dict[tup[0]]
             del _list[index]
         else:
-            key = _list[index][1]
+            key = _list[index][0]
             del _list[index]
             del _dict[key]
 
@@ -153,15 +138,7 @@ class PriorityDict(MutableMapping):
         PriorityDict.count(...).
         """
         self._dict = dict()
-
-        if len(args) > 0 and isinstance(args[0], bool):
-            if args[0]:
-                self._list = SortedList()
-            else:
-                self._list = SortedListWithKey(key=lambda tup: tup[0])
-        else:
-            self._list = SortedList()
-
+        self._list = SortedListWithKey(key=itemgetter(1))
         self.iloc = _IlocWrapper(self)
         self.update(*args, **kwargs)
 
@@ -177,8 +154,8 @@ class PriorityDict(MutableMapping):
         """
         _list, _dict = self._list, self._dict
         pos = self.bisect_right(value)
-        for key in (key for value, key in _list[:pos]):
-            del _dict[key]
+        for tup in _list[:pos]:
+            del _dict[tup[0]]
         del _list[:pos]
 
     def __contains__(self, key):
@@ -191,7 +168,7 @@ class PriorityDict(MutableMapping):
         dictionary.
         """
         value = self._dict[key]
-        self._list.remove((value, key))
+        self._list.remove((key, value))
         del self._dict[key]
 
     def __getitem__(self, key):
@@ -206,14 +183,14 @@ class PriorityDict(MutableMapping):
         Create an iterator over the keys of the dictionary ordered by the value
         sort order.
         """
-        return iter(key for value, key in self._list)
+        return map(itemgetter(0), self._list)
 
     def __reversed__(self):
         """
         Create an iterator over the keys of the dictionary ordered by the
         reversed value sort order.
         """
-        return iter(key for value, key in reversed(self._list))
+        return map(itemgetter(0), reversed(self._list))
 
     def __len__(self):
         """Return the number of (key, value) pairs in the dictionary."""
@@ -223,17 +200,13 @@ class PriorityDict(MutableMapping):
         """Set `d[key]` to *value*."""
         if key in self._dict:
             old_value = self._dict[key]
-            self._list.remove((old_value, key))
-        self._list.add((value, key))
+            self._list.remove((key, old_value))
+        self._list.add((key, value))
         self._dict[key] = value
 
     def copy(self):
         """Create a shallow copy of the dictionary."""
-        result = PriorityDict()
-        result._dict = self._dict.copy()
-        result._list = self._list.copy()
-        result.iloc = _IlocWrapper(result)
-        return result
+        return PriorityDict(self.iteritems())
 
     def __copy__(self):
         """Create a shallow copy of the dictionary."""
@@ -267,7 +240,7 @@ class PriorityDict(MutableMapping):
         """
         if key in self._dict:
             value = self._dict[key]
-            self._list.remove((value, key))
+            self._list.remove((key, value))
             return self._dict.pop(key)
         else:
             if default == _NotGiven:
@@ -281,7 +254,7 @@ class PriorityDict(MutableMapping):
         dict is empty or index is out of range. Negative indices are supported
         as for slice indices.
         """
-        value, key = self._list.pop(index)
+        key, value = self._list.pop(index)
         del self._dict[key]
         return key, value
 
@@ -295,7 +268,7 @@ class PriorityDict(MutableMapping):
             return self._dict[key]
         else:
             self._dict[key] = default
-            self._list.add((default, key))
+            self._list.add((key, default))
             return default
 
     def elements(self):
@@ -304,7 +277,7 @@ class PriorityDict(MutableMapping):
         count. Elements are returned in value sort-order. If an element’s count
         is less than one, elements() will ignore it.
         """
-        values = (repeat(key, value) for value, key in self._list)
+        values = (repeat(key, value) for key, value in self._list)
         return chain.from_iterable(values)
 
     def most_common(self, count=None):
@@ -316,12 +289,12 @@ class PriorityDict(MutableMapping):
         _list, _dict = self._list, self._dict
 
         if count is None:
-            return [(key, value) for value, key in reversed(_list)]
+            return list(reversed(_list))
 
         end = len(_dict)
         start = end - count
 
-        return [(key, value) for value, key in reversed(_list[start:end])]
+        return list(reversed(_list[start:end]))
 
     def subtract(self, elements):
         """
@@ -363,13 +336,13 @@ class PriorityDict(MutableMapping):
         if (10 * len(items)) > len(_dict):
             _dict.update(items)
             _list.clear()
-            _list.update((value, key) for key, value in iteritems(_dict))
+            _list.update(iteritems(_dict))
         else:
             for key, value in iteritems(items):
                 old_value = _dict[key]
-                _list.remove((old_value, key))
+                _list.remove((key, old_value))
                 _dict[key] = value
-                _list.add((value, key))
+                _list.add((key, value))
 
     def index(self, key):
         """
@@ -377,7 +350,7 @@ class PriorityDict(MutableMapping):
         if *key* is not present.
         """
         value = self._dict[key]
-        return self._list.index((value, key))
+        return self._list.index((key, value))
 
     def bisect_left(self, value):
         """
@@ -386,11 +359,9 @@ class PriorityDict(MutableMapping):
         already present in PriorityDict, the insertion point will be before (to
         the left of) any existing entries.
         """
-        return self._list.bisect_left((value,))
+        return self._list.bisect_left((None, value))
 
-    def bisect(self, value):
-        """Same as bisect_left."""
-        return self._list.bisect((value,))
+    bisect = bisect_left
 
     def bisect_right(self, value):
         """
@@ -398,14 +369,14 @@ class PriorityDict(MutableMapping):
         PriorityDict, the insertion point will be after (to the right
         of) any existing entries.
         """
-        return self._list.bisect_right((value, _Biggest))
+        return self._list.bisect_right((None, value))
 
     def __iadd__(self, that):
         """Add values from `that` mapping."""
         _list, _dict = self._list, self._dict
         if len(_dict) == 0:
             _dict.update(that)
-            _list.update((value, key) for key, value in iteritems(_dict))
+            _list.update(iteritems(_dict))
         elif len(that) * 3 > len(_dict):
             _list.clear()
             for key, value in iteritems(that):
@@ -413,15 +384,15 @@ class PriorityDict(MutableMapping):
                     _dict[key] += value
                 else:
                     _dict[key] = value
-            _list.update((value, key) for key, value in iteritems(_dict))
+            _list.update(iteritems(_dict))
         else:
             for key, value in iteritems(that):
                 if key in _dict:
                     old_value = _dict[key]
-                    _list.remove((old_value, key))
+                    _list.remove((key, old_value))
                     value = old_value + value
                 _dict[key] = value
-                _list.add((value, key))
+                _list.add((key, value))
         return self
 
     def __isub__(self, that):
@@ -435,15 +406,15 @@ class PriorityDict(MutableMapping):
             for key, value in iteritems(that):
                 if key in _dict:
                     _dict[key] -= value
-            _list.update((value, key) for key, value in iteritems(_dict))
+            _list.update(iteritems(_dict))
         else:
             for key, value in iteritems(that):
                 if key in _dict:
                     old_value = _dict[key]
-                    _list.remove((old_value, key))
+                    _list.remove((key, old_value))
                     value = old_value - value
                     _dict[key] = value
-                    _list.add((value, key))
+                    _list.add((key, value))
         return self
 
     def __ior__(self, that):
@@ -451,7 +422,7 @@ class PriorityDict(MutableMapping):
         _list, _dict = self._list, self._dict
         if len(_dict) == 0:
             _dict.update(that)
-            _list.update((value, key) for key, value in iteritems(_dict))
+            _list.update(iteritems(_dict))
         elif len(that) * 3 > len(_dict):
             _list.clear()
             for key, value in iteritems(that):
@@ -460,15 +431,15 @@ class PriorityDict(MutableMapping):
                     _dict[key] = old_value if old_value > value else value
                 else:
                     _dict[key] = value
-            _list.update((value, key) for key, value in iteritems(_dict))
+            _list.update(iteritems(_dict))
         else:
             for key, value in iteritems(that):
                 if key in _dict:
                     old_value = _dict[key]
-                    _list.remove((old_value, key))
+                    _list.remove((key, old_value))
                     value = old_value if old_value > value else value
                 _dict[key] = value
-                _list.add((value, key))
+                _list.add((key, value))
         return self
 
     def __iand__(self, that):
@@ -483,15 +454,15 @@ class PriorityDict(MutableMapping):
                 if key in _dict:
                     old_value = _dict[key]
                     _dict[key] = old_value if old_value < value else value
-            _list.update((value, key) for key, value in iteritems(_dict))
+            _list.update(iteritems(_dict))
         else:
             for key, value in iteritems(that):
                 if key in _dict:
                     old_value = _dict[key]
-                    _list.remove((old_value, key))
+                    _list.remove((key, old_value))
                     value = old_value if old_value < value else value
                     _dict[key] = value
-                    _list.add((value, key))
+                    _list.add((key, value))
         return self
 
     def __add__(self, that):
@@ -504,7 +475,7 @@ class PriorityDict(MutableMapping):
                 _dict[key] += value
             else:
                 _dict[key] = value
-        _list.update((value, key) for key, value in iteritems(_dict))
+        _list.update(iteritems(_dict))
         return result
 
     def __sub__(self, that):
@@ -515,7 +486,7 @@ class PriorityDict(MutableMapping):
         for key, value in iteritems(that):
             if key in _dict:
                 _dict[key] -= value
-        _list.update((value, key) for key, value in iteritems(_dict))
+        _list.update(iteritems(_dict))
         return result
 
     def __or__(self, that):
@@ -529,7 +500,7 @@ class PriorityDict(MutableMapping):
                 _dict[key] = old_value if old_value > value else value
             else:
                 _dict[key] = value
-        _list.update((value, key) for key, value in iteritems(_dict))
+        _list.update(iteritems(_dict))
         return result
 
     def __and__(self, that):
@@ -541,7 +512,7 @@ class PriorityDict(MutableMapping):
             if key in _dict:
                 old_value = _dict[key]
                 _dict[key] = old_value if old_value < value else value
-        _list.update((value, key) for key, value in iteritems(_dict))
+        _list.update(iteritems(_dict))
         return result
 
     def __eq__(self, that):
@@ -601,14 +572,14 @@ class PriorityDict(MutableMapping):
         Return a list of the dictionary's items (``(key, value)``
         pairs). Items are ordered by their value from least to greatest.
         """
-        return list((key, value) for value, key in self._list)
+        return list(self._list)
 
     def iteritems(self):
         """
         Return an iterable over the items (``(key, value)`` pairs) of the
         dictionary. Items are ordered by their value from least to greatest.
         """
-        return iter((key, value) for value, key in self._list)
+        return iter(self._list)
 
     @not26
     def viewitems(self):
@@ -628,14 +599,14 @@ class PriorityDict(MutableMapping):
         Return a list of the dictionary's keys. Keys are ordered
         by their corresponding value from least to greatest.
         """
-        return list(key for value, key in self._list)
+        return list(tup[0] for tup in self._list)
 
     def iterkeys(self):
         """
         Return an iterable over the keys of the dictionary. Keys are ordered
         by their corresponding value from least to greatest.
         """
-        return iter(key for value, key in self._list)
+        return iter(tup[0] for tup in self._list)
 
     @not26
     def viewkeys(self):
@@ -655,14 +626,14 @@ class PriorityDict(MutableMapping):
         Return a list of the dictionary's values. Values are
         ordered from least to greatest.
         """
-        return list(value for value, key in self._list)
+        return list(tup[1] for tup in self._list)
 
     def itervalues(self):
         """
         Return an iterable over the values of the dictionary. Values are
         iterated from least to greatest.
         """
-        return iter(value for value, key in self._list)
+        return iter(tup[1] for tup in self._list)
 
     @not26
     def viewvalues(self):
@@ -679,10 +650,16 @@ class PriorityDict(MutableMapping):
 
     def __repr__(self):
         """Return a string representation of PriorityDict."""
-        return 'PriorityDict({0})'.format(repr(dict(self)))
+        template = '{0}({{{1}}})'
+        items = ', '.join('{0}: {1}'.format(repr(key), repr(value))
+                          for key, value in self._list)
+        return template.format(
+            self.__class__.__name__,
+            items
+        )
 
     def _check(self):
         self._list._check()
         assert len(self._dict) == len(self._list)
         assert all(key in self._dict and self._dict[key] == value
-                   for value, key in self._list)
+                   for key, value in self._list)

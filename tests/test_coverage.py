@@ -63,7 +63,7 @@ def test_iloc_getitem():
 def test_iloc_getitem_slice():
     temp = PriorityDict(enumerate(string.lowercase))
     that = list(enumerate(string.lowercase))
-    assert temp.iloc[5:20:3] == list(len(string.lowercase))[5:20:3]
+    assert temp.iloc[5:20:3] == [5, 8, 11, 14, 17]
 
 def test_iloc_delitem():
     temp = PriorityDict(enumerate(string.lowercase))
