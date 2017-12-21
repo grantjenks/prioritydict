@@ -6,6 +6,9 @@ PriorityDict Implementation
 
 * TODO test correct exception types raised on errors
 * TODO test stress
+* TODO What if keys are not orderable?
+  * TODO User Pair rather than _Biggest
+* TODO order values by key
 * TODO update docs
 
 PriorityDict is an Apache2 licensed implementation of a dictionary which
@@ -23,11 +26,12 @@ Compared with Counter
 * PriorityDict({0: 'a'}) + PriorityDict({1: 'b', 2: 'c'}) works
 * Set-like subtraction, addition operators
 * Set-like comparison operators
+
 """
 
 from sortedcontainers import SortedListWithKey
 
-from collections import Counter, MutableMapping
+from collections import Counter, MutableMapping, Mapping
 
 from functools import wraps
 from operator import itemgetter
@@ -331,7 +335,12 @@ class PriorityDict(MutableMapping):
         those key/value pairs: ``d.update(red=1, blue=2)``.
         """
         _list, _dict = self._list, self._dict
-        items = dict(*args, **kwargs)
+
+        if len(args) == 1 and len(kwargs) == 0 and isinstance(args[0], Mapping):
+            items = args[0]
+        else:
+            items = dict(*args, **kwargs)
+
         if (10 * len(items)) > len(_dict):
             _dict.update(items)
             _list.clear()
