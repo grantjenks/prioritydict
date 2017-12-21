@@ -6,7 +6,6 @@ PriorityDict Implementation
 
 * TODO test correct exception types raised on errors
 * TODO test stress
-* TODO test slwk
 * TODO update docs
 
 PriorityDict is an Apache2 licensed implementation of a dictionary which
